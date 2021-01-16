@@ -1,0 +1,23 @@
+{
+  "name": "snow-gl",
+  "version": "1.0.0",
+  "description": "place for my gl experiments",
+  "main": "src/index.ts",
+  "repository": "git@github.com:Rupertofly/snow-gl.git",
+  "author": "Ruby Quail <ruby@rubyquail.design>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/d3": "^6.2.0",
+    "snowpack": "^3.0.10"
+  },
+  "prettier": {
+    "tabWidth": 2,
+    "singleQuote": true,
+    "trailingComma": "es5"
+  },
+  "dependencies": {
+    "d3": "^6.3.1",
+    "regl": "^2.0.1",
+    "snowpack-plugin-raw-file-loader": "^1.0.9"
+  }
+}
