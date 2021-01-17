@@ -16,7 +16,9 @@
     "trailingComma": "es5"
   },
   "dependencies": {
+    "@rupertofly/capture-client": "^1.1.1",
     "d3": "^6.3.1",
+    "open-simplex-noise": "^2.4.0",
     "regl": "^2.0.1",
     "snowpack-plugin-raw-file-loader": "^1.0.9"
   }
