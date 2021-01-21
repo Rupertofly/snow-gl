@@ -7,38 +7,55 @@ import Phy from './PhysarumParticle';
 import ns from 'open-simplex-noise';
 import rubyCapture from '@rupertofly/capture-client';
 import { loadImage } from './loadImage';
-const { PI, floor, round, ceil, sin, cos } = Math;
+const { PI, floor, round, ceil, sin, cos, random: rnd } = Math;
+const TAU = PI * 2;
 const noise = ns.makeNoise2D(Math.random());
 const info = document.createElement('pre');
 const centralRand = d3.randomUniform(50);
 const moss = loadImage('moss.jpg');
 const road = loadImage('road.jpg');
+const glCanvas = document.getElementById('glcanvas') as HTMLCanvasElement;
+glCanvas.width = C.RADIUS;
+glCanvas.height = C.RADIUS;
 const GL = regl(
-  (document.getElementById('glcanvas') as HTMLCanvasElement).getContext(
-    'webgl',
-    { preserveDrawingBuffer: false }
-  )!
+  glCanvas.getContext('webgl', { preserveDrawingBuffer: false })!
 );
 let mossTex: regl.Texture;
 let roadTex: regl.Texture;
-const lolCanvas = document.createElement('canvas');
-lolCanvas.width = 1080;
-lolCanvas.height = 1080;
-const cx = lolCanvas.getContext('2d');
-cx.clearRect(0, 0, 1080, 1080);
-cx.scale(1, -1);
-cx.translate(0, -1080);
-cx.fillStyle = `#020000`;
-cx.font = 'bold 64pt "Marker Felt"';
-cx.fillText('Slimy Friends', 100, 300);
+const particleEnv = document.createElement('canvas');
+particleEnv.width = C.RADIUS;
+particleEnv.height = C.RADIUS;
+const envCxt = particleEnv.getContext('2d');
+envCxt.clearRect(0, 0, C.RADIUS, C.RADIUS);
+envCxt.scale(1, -1);
+envCxt.translate(0, -1 * C.RADIUS);
+envCxt.fillStyle = `#020000`;
+envCxt.font = 'bold 64pt "Marker Felt"';
+envCxt.fillText('Slimy Friends', 100, 300);
 GL.clear({ color: [0, 0, 0, 1] });
-const defaultOpts: regl.DrawConfig = {
+const defaultREGLOptions: regl.DrawConfig = {
   depth: { enable: false },
   attributes: {
     position: [-1, -1, 0, 1, -1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1, 1, 0],
   },
   count: 6,
   vert: `attribute vec3 position;varying vec2 pos;void main(){gl_Position = vec4(position,1.0);pos = vec2(0.5+position.x/2.,0.5+position.y/2.);}`,
+};
+const palleteData = new Uint8Array(4 * 255);
+const palInterpolator = d3.interpolateLab('#fd9761', '#4a4083');
+for (let i = 0; i < 4 * 255; i += 4) {
+  const amount = i / (255 * 4);
+  const mgma = d3.rgb(palInterpolator(d3.easeCubicOut(amount)));
+  palleteData[i] = mgma.r;
+  palleteData[i + 1] = mgma.g;
+  palleteData[i + 2] = mgma.b;
+  palleteData[i + 3] = 255;
+}
+const palleteTexture = GL.texture({ width: 255, height: 1, data: palleteData });
+
+const defaultUniforms = {
+  u_size: [C.RADIUS, C.RADIUS],
+  u_pallete: palleteTexture,
 };
 const depositArray = new Uint8Array(C.RADIUS * C.RADIUS * 4).fill(0);
 const depositTexture = GL.texture({
@@ -53,15 +70,18 @@ const AFBO = GL.framebuffer({
   depth: false,
 });
 const scale = 20;
-const noiseData = new Uint8Array(1080 * 1080 * 4);
+const noiseData = new Uint8Array(C.RADIUS * C.RADIUS * 4);
 for (let i = 0; i < noiseData.length; i += 4) {
   const ai = floor(i / 4);
-  const x = ai % 1080;
-  const y = Math.floor(ai / 1080);
+  const x = ai % C.RADIUS;
+  const y = Math.floor(ai / C.RADIUS);
   const n = noise(x / scale, y / scale);
-  noiseData[i] = round(3 * (n + 1));
+  noiseData[i] = round(20 * (n + 1));
 }
-const BTexture = GL.texture({ shape: [C.RADIUS, C.RADIUS] });
+const BTexture = GL.texture({
+  shape: [C.RADIUS, C.RADIUS],
+  data: noiseData,
+});
 const BaseTexture = GL.texture({
   shape: [C.RADIUS, C.RADIUS],
   data: noiseData,
@@ -93,20 +113,12 @@ type Props = {
   action: ACTIONS;
   bT?: regl.Texture;
 };
-const particles = new Set<Phy>();
-const cSpec = new Uint8Array(4 * 255);
-for (let i = 0; i < 4 * 255; i += 4) {
-  const mgma = d3.rgb(d3.interpolateMagma(i / (255 * 4)));
-  cSpec[i] = mgma.r;
-  cSpec[i + 1] = mgma.g;
-  cSpec[i + 2] = mgma.b;
-  cSpec[i + 3] = 255;
-}
-const cTexture = GL.texture({ width: 255, height: 1, data: cSpec });
-
+let particles: Phy[] = [];
+const positionMatrix = new Uint8Array(Math.pow(C.RADIUS, 2));
 const drawFunction = GL<Uniforms, {}, Props>({
-  ...defaultOpts,
+  ...defaultREGLOptions,
   uniforms: {
+    ...defaultUniforms,
     u_baseTexture: (c, p) => p.bT || BaseTexture,
     u_depositTexture: (c, p) => p.deposit,
     u_incomingTexture: (c, p) => p.inputTexture,
@@ -117,31 +129,35 @@ const drawFunction = GL<Uniforms, {}, Props>({
   framebuffer: (c, p) => p.outputFBO,
 });
 let fc: any;
-let px: Uint8Array = new Uint8Array(1080 * 1080 * 4);
-const cap = new rubyCapture(
-  4646,
-  document.getElementById('glcanvas') as HTMLCanvasElement
-);
-cap.start({
-  frameRate: 60,
-  lengthIsFrames: false,
-  maxLength: 30,
-  name: 'slime',
-});
-let cX = 500;
-let cY = 500;
+let px: Uint8Array = new Uint8Array(C.RADIUS * C.RADIUS * 4);
+// const cap = new rubyCapture(
+//   4646,
+//   document.getElementById('glcanvas') as HTMLCanvasElement
+// );
+// cap.start({
+//   frameRate: 60,
+//   lengthIsFrames: false,
+//   maxLength: 30,
+//   name: 'slime',
+// });
+let cX = C.RADIUS / 2;
+let cY = C.RADIUS / 2;
 let frameCount = 0;
+const radius = C.RADIUS / 4;
+
+d3.range(floor(Math.pow(C.RADIUS, 2) * 0.15)).map(() => {
+  const ang = rnd() * TAU;
+  let x = rnd() * C.RADIUS;
+  let y = rnd() * C.RADIUS;
+  particles.push(new Phy(x, y, positionMatrix, rnd() * PI * 2));
+});
 const draw = async () => {
-  cX = 500 + 300 * cos(frameCount / 600);
-  cY = 500 + 300 * sin(frameCount / 400);
-  d3.range(floor(200)).map(() => {
-    let x = cX + (100 - Math.random() * 200);
-    let y = cY + (100 - Math.random() * 200);
-    particles.add(new Phy(x, y, PI + Math.atan2(y - cY, x - cX)));
-  });
+  // cX = C.RADIUS / 2 + 300 * cos(frameCount / 600);
+  // cY = C.RADIUS / 2 + 300 * sin(frameCount / 400);
+
   depositArray.fill(0);
   particles.forEach((pcl) => {
-    if (pcl.lifeSpan <= 0) particles.delete(pcl);
+    if (pcl.lifeSpan <= 0) particles.splice(particles.indexOf(pcl), 1);
   });
   particles.forEach((pcl) => {
     pcl.senseAndTurn(px);
@@ -149,7 +165,8 @@ const draw = async () => {
   particles.forEach((pcl) => {
     pcl.attemptMove(depositArray);
   });
-  depositTexture({ shape: [1080, 1080], data: depositArray });
+  particles = d3.shuffle(particles);
+  depositTexture({ shape: [C.RADIUS, C.RADIUS], data: depositArray });
   drawFunction({
     action: ACTIONS.DEPOSIT,
     deposit: depositTexture,
@@ -164,33 +181,20 @@ const draw = async () => {
     outputFBO: BFBO,
   });
 
-  drawFunction({
-    action: ACTIONS.DECAY,
-    deposit: depositTexture,
-    inputTexture: BTexture,
-    outputFBO: AFBO,
-  });
-
-  px = GL.read({ framebuffer: AFBO }) as any;
+  px = GL.read({ framebuffer: BFBO }) as any;
   // let cp = 0;
   // for (let i = 0; i < px.length; i = i + 4) cp = cp + px[i];
   // console.log(cp);
 
   drawFunction({
-    action: ACTIONS.PASSTHROUGH,
-    deposit: depositTexture,
-    inputTexture: ATexture,
-    outputFBO: BFBO,
-  });
-  drawFunction({
     action: ACTIONS.RENDER,
     deposit: mossTex,
     bT: roadTex,
-    inputTexture: ATexture,
+    inputTexture: BTexture,
     outputFBO: null,
   });
   GL._gl.flush();
-  await cap.capture();
+  // await cap.capture();
   frameCount = frameCount + 1;
   requestAnimationFrame(draw);
 };

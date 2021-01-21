@@ -17,7 +17,7 @@ module.exports = {
         open: 'none',
     },
     buildOptions: {
-        /* ... */
+        sourcemap:true
     },
     exclude: ['**/node_modules/**/*', './output'],
 };

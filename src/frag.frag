@@ -4,11 +4,13 @@
 #define PASS_RENDER 3
 #define PASS_PASSTHROUGH 4
 #define C_DEPOSIT 5.
+#define DECAY_VALUE 0.1
 
 precision mediump float;
 uniform sampler2D u_incomingTexture;
 uniform sampler2D u_depositTexture;
 uniform sampler2D u_baseTexture;
+uniform sampler2D u_pallete;
 uniform int u_pass;
 
 uniform vec2 u_resolution;
@@ -16,12 +18,10 @@ varying vec2 pos;
 
 vec3 deposit(vec2 coords) {
   vec2 uv = coords/u_resolution;
-  float baseAmt = texture2D(u_baseTexture,uv).r;
   float depValue = texture2D(u_depositTexture,uv).r;
   float depHeading = texture2D(u_depositTexture,uv).g;
   vec3 existingValue = texture2D(u_incomingTexture,uv).rgb;
   vec3 cl = existingValue+vec3(depValue,0.,0.);
-  if (cl.r < 20./255.) cl += vec3(baseAmt,0.,0.);
   return vec3(cl.r,depHeading,0.);
 
 }
@@ -34,17 +34,18 @@ vec3 diffuse(vec2 coords) {
     for (int y = -1; y <= 1; y++) {
       vec2 nUV = vec2((coords.x+float(x))/u_resolution.x,(coords.y+float(y))/u_resolution.y);
       vec3 nVal = texture2D(u_incomingTexture,nUV).rgb;
-      if (nVal.r > pre.r) {majorHeading = mix(nVal.g,majorHeading,pre.r/nVal.r);}
       acc = acc + nVal.r;
     }
   }
-  return vec3(acc/9.,majorHeading,pre.b);
+  float avgVal = acc/9.;
+  float decay = DECAY_VALUE * avgVal;
+  return vec3(avgVal - decay,majorHeading,pre.b);
 
 }
 vec3 decay(vec2 coords) {
   vec2 uv = coords/u_resolution;
   vec3 incomingValue = texture2D(u_incomingTexture,uv).rgb;
-  float newValue = incomingValue.r-0.01*incomingValue.r;
+  float newValue = incomingValue.r- DECAY_VALUE *incomingValue.r;
   return vec3(newValue,incomingValue.gb);
 
 }
@@ -103,22 +104,7 @@ vec3 render(vec2 coords) {
   vec3 incomingValue = texture2D(u_incomingTexture,uv).rgb;
   float val = incomingValue.r;
 
-  float acc = 0.;
-  float cnt = 0.;
-
-  for (int x = -4; x <=4;x++) {
-    for (int y = -4;y <=4;y++) {
-      vec2 nUV = vec2((coords.x+float(x))/u_resolution.x,(coords.y+float(y))/u_resolution.y);
-      float nVal = texture2D(u_incomingTexture,nUV).r;
-      float difference = abs(val-nVal);
-      if (difference < 0.05) {
-        acc += nVal;
-        cnt += 1.;
-      }
-    }
-  }
-  float xVal = clamp(acc/cnt,0.,1.);
-  vec4 colour = mix(texture2D(u_baseTexture,uv*2.),texture2D(u_depositTexture,uv*1.),smoothstep(0.5,0.8,xVal));
+  vec4 colour = texture2D(u_pallete,vec2(val,0.5));
   return colour.rgb;
 
 }

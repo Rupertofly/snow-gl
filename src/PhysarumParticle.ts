@@ -1,41 +1,10 @@
 import { randomUniform } from 'd3';
 import * as C from './constants';
+import { Sensor } from './Sensor';
 const { PI, floor, sign, abs, sin, cos, round } = Math;
 const TAU = Math.PI * 2;
 const fr = randomUniform(PI);
 const rA = () => PI / 2 - fr();
-class Sensor {
-  x: number;
-  y: number;
-  constructor(x: number, y: number) {
-    this.x = x;
-    this.y = y;
-  }
-  getSensorValue(
-    pixels: ArrayLike<number>,
-    width: number,
-    height: number,
-    channels = 4
-  ) {
-    const i = channels * (this.y * width + this.x);
-    if (i < 0 || i > pixels.length) {
-      return 0;
-    }
-    return pixels[i];
-  }
-  updateFromPhy(
-    startX: number,
-    startY: number,
-    angle: number,
-    dist: number = C.SENSOR_OFFSET
-  ) {
-    const nX = (1080 + round(startX + dist * cos(angle))) % 1080;
-    const nY = (1080 + round(startY + dist * sin(angle))) % 1080;
-    this.x = nX;
-    this.y = nY;
-    return this;
-  }
-}
 export function rotate(startingAngle: number, amount: number) {
   const adjAmount = sign(amount) * (abs(amount) % TAU);
   const adjStartingAngle =
@@ -45,6 +14,7 @@ export function rotate(startingAngle: number, amount: number) {
 export class PhysarumParticle {
   x: number;
   y: number;
+  positionMatrix: Uint8Array;
   heading: number = Math.random() * TAU;
   sensorL: Sensor;
   sensorC: Sensor;
@@ -54,7 +24,8 @@ export class PhysarumParticle {
   fieldHeight = C.RADIUS;
   lifespan: number;
   static rotate = rotate;
-  constructor(x, y, heading?, wid?, hei?) {
+  constructor(x, y, mat: Uint8Array, heading?, wid?, hei?) {
+    this.positionMatrix = mat;
     this.x = x;
     this.y = y;
     this.heading = heading ?? this.heading;
@@ -66,7 +37,7 @@ export class PhysarumParticle {
       rotate(this.heading, C.SENSOR_ANGLE)
     );
     this.sensorC = new Sensor(0, 0).updateFromPhy(this.x, this.y, this.heading);
-    this.lifeSpan = 900;
+    this.lifeSpan = C.LIFESPAN;
     this.sensorR = new Sensor(0, 0).updateFromPhy(
       this.x,
       this.y,
@@ -81,9 +52,8 @@ export class PhysarumParticle {
     channels = 4
   ) {
     const i = channels * (round(this.y) * width + round(this.x));
-
-    pixelData[i] += C.DEPOSIT;
-    pixelData[i + 1] = floor((this.heading / TAU) * 255);
+    if (pixelData[i] + C.DEPOSIT > 255) pixelData[i] = 255;
+    else pixelData[i] = pixelData[i] + C.DEPOSIT;
   }
   senseAndTurn(
     pixelData: ArrayLike<number>,
@@ -109,7 +79,7 @@ export class PhysarumParticle {
       height,
       channels
     );
-    this.lifeSpan--;
+    // this.lifeSpan--;
     if (CVal > LVal && CVal > RVal) {
       return;
     } else if (CVal < LVal && CVal < RVal) {
@@ -143,14 +113,23 @@ export class PhysarumParticle {
     height = this.fieldHeight,
     channels = 4
   ) {
-    const nX = (1080 + (this.x + C.STEP_LENGTH * cos(this.heading))) % 1080;
-    const nY = (1080 + (this.y + C.STEP_LENGTH * sin(this.heading))) % 1080;
+    const posI = round(this.y) * width + round(this.x);
+    const ci = channels * (round(this.y) * width + round(this.x));
+    const nX =
+      (C.RADIUS + (this.x + C.STEP_LENGTH * cos(this.heading))) % C.RADIUS;
+    const nY =
+      (C.RADIUS + (this.y + C.STEP_LENGTH * sin(this.heading))) % C.RADIUS;
     // if (nX > width || nX < 0) return this.rotateParticle(Math.random() * TAU);
     // if (nY > height || nY < 0) return this.rotateParticle(Math.random() * TAU);
-    const i = channels * (floor(nY) * width + floor(nX));
-    if (i < 0 || i > pixelData.length) {
-      return this.rotateParticle(Math.random() * TAU);
+    const nextPosI = (round(nY) % C.RADIUS) * width + (round(nX) % C.RADIUS);
+    const i =
+      channels * ((round(nY) % C.RADIUS) * width + (round(nX) % C.RADIUS));
+    if (this.positionMatrix[nextPosI] > 0) {
+      this.rotateParticle(TAU * Math.random());
+      return this;
     }
+    this.positionMatrix[posI] = 0;
+    this.positionMatrix[nextPosI] = 1;
     this.x = nX;
     this.y = nY;
     this.deposit(pixelData);
